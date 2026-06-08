@@ -29,3 +29,12 @@ export interface AuthResponse {
     name: string | null;
   };
 }
+
+export interface User {
+  id: string;
+  googleId?: string;
+  email: string;
+  password?: string;
+  name: string;
+  createdAt: Date;
+}

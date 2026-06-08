@@ -1,3 +1,5 @@
+import z from "zod";
+
 export interface CreateItemInput {
   text: string;
   listId: string;
@@ -10,3 +12,7 @@ export interface UpdateItemInput {
   note?: string;
   checked?: boolean;
 }
+
+export const ItemsForListSchema = z.object({
+  listId: z.uuid(),
+});
