@@ -1,5 +1,6 @@
 import type { NextFunction, Request, Response } from "express";
 import { prisma } from "../libs/prisma.js";
+import type { AddNewItemInput, EditItemInput } from "../types/item.js";
 
 export type ItemsRequest = Request<{ listId: string }>;
 
@@ -29,3 +30,183 @@ export async function getItems(
     next(err);
   }
 }
+
+export type AddNewItemRequest = Request<{}, any, AddNewItemInput>;
+
+export const addItem = async (req: AddNewItemRequest, res: Response) => {
+  try {
+    const { name, listId, quantity, category, note } = req.body;
+    const { id: userId } = req.user!;
+
+    const userList = await prisma.userList.findFirst({
+      where: {
+        listId: listId,
+        userId: userId,
+      },
+    });
+
+    if (!userList) {
+      res.status(400).send("List not found");
+      return;
+    }
+
+    const newItem = await prisma.item.create({
+      data: {
+        name,
+        listId,
+        quantity: quantity ?? null,
+        category: category ?? null,
+        note: note ?? null,
+        creatorUserId: userId,
+      },
+    });
+
+    res.status(201).json(newItem);
+  } catch (error) {
+    res.status(500).json({ error: "Failed to create item" });
+  }
+};
+
+export type EditItemRequest = Request<{ itemId: string }, any, EditItemInput>;
+
+export const editItem = async (req: EditItemRequest, res: Response) => {
+  try {
+    const { name, quantity, category, note } = req.body;
+    const { itemId } = req.params;
+    const { id: userId } = req.user!;
+
+    const item = await prisma.item.findUnique({
+      where: {
+        id: itemId,
+      },
+    });
+
+    if (!item) {
+      res.status(400).send("Item not found");
+      return;
+    }
+
+    const editedItem = await prisma.item.update({
+      where: { id: itemId },
+      data: {
+        ...(name !== undefined ? { name } : {}),
+        ...(quantity !== undefined ? { quantity } : {}),
+        ...(category !== undefined ? { category } : {}),
+        ...(note !== undefined ? { note } : {}),
+      },
+    });
+
+    res.status(201).json(editedItem);
+  } catch (error) {
+    res.status(500).json({ error: "Failed to create item" });
+  }
+};
+
+export type ItemIdRequest = Request<{ itemId: string }>;
+
+export const checkItem = async (req: ItemIdRequest, res: Response) => {
+  try {
+    const { itemId } = req.params;
+    const { id: userId } = req.user!;
+
+    const item = await prisma.item.findUnique({
+      where: { id: itemId },
+    });
+
+    if (!item) {
+      res.status(404).json({ error: "Item not found" });
+      return;
+    }
+
+    const userList = await prisma.userList.findFirst({
+      where: {
+        listId: item.listId,
+        userId: userId,
+      },
+    });
+
+    if (!userList) {
+      res.status(403).json({ error: "Unauthorized" });
+      return;
+    }
+
+    const checkedItem = await prisma.item.update({
+      where: { id: itemId },
+      data: { checked: true },
+    });
+
+    res.status(200).json(checkedItem);
+  } catch (error) {
+    res.status(500).json({ error: "Failed to check item" });
+  }
+};
+
+export const uncheckItem = async (req: ItemIdRequest, res: Response) => {
+  try {
+    const { itemId } = req.params;
+    const { id: userId } = req.user!;
+
+    const item = await prisma.item.findUnique({
+      where: { id: itemId },
+    });
+
+    if (!item) {
+      res.status(404).json({ error: "Item not found" });
+      return;
+    }
+
+    const userList = await prisma.userList.findFirst({
+      where: {
+        listId: item.listId,
+        userId: userId,
+      },
+    });
+
+    if (!userList) {
+      res.status(403).json({ error: "Unauthorized" });
+      return;
+    }
+
+    const uncheckedItem = await prisma.item.update({
+      where: { id: itemId },
+      data: { checked: false },
+    });
+
+    res.status(200).json(uncheckedItem);
+  } catch (error) {
+    res.status(500).json({ error: "Failed to uncheck item" });
+  }
+};
+
+export const deleteItem = async (req: ItemIdRequest, res: Response) => {
+  try {
+    const { itemId } = req.params;
+    const { id: userId } = req.user!;
+
+    const item = await prisma.item.findUnique({
+      where: { id: itemId },
+    });
+
+    if (!item) {
+      res.status(404).json({ error: "Item not found" });
+      return;
+    }
+
+    const userList = await prisma.userList.findFirst({
+      where: {
+        listId: item.listId,
+        userId: userId,
+      },
+    });
+
+    if (!userList) {
+      res.status(403).json({ error: "Unauthorized" });
+      return;
+    }
+
+    await prisma.item.delete({ where: { id: itemId } });
+    res.status(200).json({ message: "Item deleted" });
+  } catch (error) {
+    res.status(500).json({ error: "Failed to delete item" });
+  }
+};

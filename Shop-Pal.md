@@ -1,101 +1,111 @@
-# Grocery List App
+# Shop Pal
 
 ## Overview
 
-A real-time shared grocery list app for two users (you and your partner). Items are added via text, organized by category using an AI agent, and synced in real time between both users.
+A shared shopping list app where users can create multiple named lists, add items to them, and manage those items collaboratively. The backend is a REST API built with Express and Prisma. Real-time sync and AI-assisted categorization are planned but not yet implemented.
 
 ---
 
 ## Tech Stack
 
 | Layer | Technology |
-|---|---|
+| --- | --- |
 | Frontend | React + Vite + TypeScript |
 | Backend | Express.js + TypeScript |
-| Real-time | WebSockets |
 | Database | PostgreSQL hosted on Neon |
 | ORM | Prisma |
-| AI Agents | OpenAI Agents SDK (JS) |
-| Auth | JWT (JSON Web Tokens) |
+| Auth | JWT (30-day expiry) + Google OAuth |
+| Validation | Zod |
 
 ### Why Neon?
-Neon is a free serverless PostgreSQL hosting service — similar to MongoDB Atlas but for PostgreSQL. Sign up at [neon.tech](https://neon.tech), create a project, copy the connection string, and paste it into your `.env` as `DATABASE_URL`. No credit card needed.
+
+Neon is a free serverless PostgreSQL hosting service. Sign up at [neon.tech](https://neon.tech), create a project, copy the connection string, and paste it into your `.env` as `DATABASE_URL`. No credit card needed.
 
 ---
 
-## What the App Does
+## What the App Does (Current State)
 
-You and your partner share one grocery list. Either of you can add, edit, check off, or delete items at any time. When one person makes a change, the other sees it instantly without refreshing the page.
-
-Adding items is designed to be fast — you type a rough list like "milk bread chicken tomatoes" and the AI agent automatically organizes it into categories for you. No need to manually sort anything.
-
-Each item can have additional details if needed — quantity, a note, and it shows who added it.
+Users register or sign in via Google, then create and manage any number of named shopping lists. Each list has an owner. Items on a list can be added, edited, checked/unchecked, and deleted. Authorization is enforced: you can only interact with lists and items you are a member of.
 
 ---
 
-## Pages
+## Data Model
 
-### Login `/login`
-- Email and password login
-- Both you and your partner have separate accounts
-- On success, redirects to the list page
+### User
 
-### List `/list`
-- The main page of the app
-- Text input where you type one or multiple items at once
-- The AI agent reads your input and organizes items by category (dairy, produce, meat, etc.)
-- Items are displayed grouped by category
-- Both users see the list update in real time as changes happen
-- You can check off items as you shop
-- You can delete items
-- Click any item to see and edit its details
+- `id`, `email`, `name`
+- `password` (hashed with bcrypt — only set for email/password accounts)
+- `googleId` (only set for Google OAuth accounts)
 
-### Item `/list/:itemId`
-- Dedicated page for a single item
-- You can edit: name, category, quantity, note
-- Shows who added the item
-- Changes are saved and reflected on the list page instantly for both users
+### List
 
----
+- `id`, `name`, `ownerId`, `createdAt`
+- A user can own and belong to multiple lists
 
-## AI Agent
+### UserList (join table)
 
-The agent has one job: take raw text input and organize it into grocery categories.
+- Links a `userId` to a `listId`
+- `status`: currently `OWNER` — designed to support membership roles (e.g. collaborator) in the future
 
-**Example:**
+### Item
 
-Input from user:
-```
-milk bread chicken tomatoes eggs pasta
-```
-
-Agent output:
-```
-dairy:    milk, eggs
-bakery:   bread, pasta
-meat:     chicken
-produce:  tomatoes
-```
-
-The agent runs every time a user submits the text input. It does not learn or remember — it just organizes whatever you give it each time.
+- `id`, `name`, `listId`, `creatorUserId`
+- Optional fields: `quantity` (string), `category` (string), `note` (string)
+- `checked` (boolean, defaults to false)
+- `createdAt` — items are returned ordered newest-first
 
 ---
 
-## Real-time Behavior
+## API
 
-Any change to the list is immediately visible to both users:
-- Adding new items
-- Checking off an item
-- Editing an item's details
-- Deleting an item
+All routes except `/auth/*` require a `Bearer <token>` JWT in the `Authorization` header.
 
-This is handled via WebSockets — both users are connected to the backend at all times, and the server pushes updates to everyone when something changes.
+### Auth — `/auth`
+
+| Method | Path | Body | Description |
+| --- | --- | --- | --- |
+| POST | `/auth/register` | `{ email, password, name? }` | Create account with email and password |
+| POST | `/auth/login` | `{ email, password }` | Log in with email and password |
+| POST | `/auth/google` | `{ idToken }` | Sign in or register via Google OAuth |
+
+All three return `{ token, user: { id, email, name } }`.
+
+### Lists — `/lists`
+
+| Method | Path | Body | Description |
+| --- | --- | --- | --- |
+| GET | `/lists` | — | Get all lists the authenticated user belongs to |
+| POST | `/lists` | `{ name }` | Create a new list; caller becomes the owner |
+
+### Items — `/items`
+
+| Method | Path | Body | Description |
+| --- | --- | --- | --- |
+| GET | `/items/:listId` | — | Get all items for a list (newest first) |
+| POST | `/items` | `{ listId, name, quantity?, category?, note? }` | Add an item to a list you belong to |
+| PATCH | `/items/:itemId` | `{ name, quantity?, category?, note? }` | Edit an item's fields |
+| PATCH | `/items/check/:itemId` | — | Mark an item as checked |
+| PATCH | `/items/uncheck/:itemId` | — | Mark an item as unchecked |
+| DELETE | `/items/:itemId` | — | Delete an item |
+
+**Authorization rules:**
+
+- `POST /items` — verifies the caller is a member of the target list via `UserList`
+- `check`, `uncheck`, `delete` — verify the caller is a member of the item's list
+- `PATCH /items/:itemId` (edit) — currently only checks that the item exists, not list membership (to be fixed)
+
+---
+
+## Planned Features (Not Yet Implemented)
+
+- **Real-time sync** — WebSocket support so both users see changes instantly without refreshing
+- **AI categorization** — an agent that takes raw text input ("milk bread chicken") and organizes items into grocery categories automatically
+- **List sharing / invites** — the `UserList` join table and `status` field are already in place to support adding collaborators to a list
 
 ---
 
 ## Notes
 
-- This is a tutorial/learning project — not production ready
-- Only 2 users (you and your partner) — no multi-household support
+- This is a learning project — not production ready
 - No email verification or password reset
-- The AI agent organizes items on every submission — it does not remember past lists
+- Google OAuth and email/password auth coexist; a user created via Google has no password and cannot log in via email
