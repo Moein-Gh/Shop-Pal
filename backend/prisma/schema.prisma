@@ -1,0 +1,67 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id        String     @id @default(uuid())
+  googleId  String?    @unique
+  email     String     @unique
+  password  String?
+  name      String?
+  createdAt DateTime   @default(now())
+  userLists UserList[]
+  lists     List[]
+  items     Item[]
+}
+
+model List {
+  id        String     @id @default(uuid())
+  name      String
+  ownerId   String
+  createdAt DateTime   @default(now())
+  owner     User       @relation(fields: [ownerId], references: [id])
+  items     Item[]
+  userLists UserList[]
+}
+
+model Item {
+  id            String   @id @default(uuid())
+  name          String
+  listId        String
+  quantity      String?
+  category      String?
+  note          String?
+  checked       Boolean  @default(false)
+  creatorUserId String
+  createdAt     DateTime @default(now())
+
+  List List @relation(fields: [listId], references: [id])
+  User User @relation(fields: [creatorUserId], references: [id])
+}
+
+enum UserListStatusEnum {
+  OWNER
+  MEMBER
+  PENDING
+}
+
+model UserList {
+  id        String             @id @default(uuid())
+  userId    String
+  listId    String
+  status    UserListStatusEnum @default(MEMBER)
+  createdAt DateTime           @default(now())
+
+  User User @relation(fields: [userId], references: [id])
+  List List @relation(fields: [listId], references: [id])
+}
