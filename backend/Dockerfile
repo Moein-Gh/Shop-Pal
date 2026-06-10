@@ -26,7 +26,7 @@ RUN npm ci --omit=dev
 
 # Copy compiled output and generated Prisma client
 COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
+COPY --from=builder /app/src/generated ./src/generated
 
 
 EXPOSE 3001
