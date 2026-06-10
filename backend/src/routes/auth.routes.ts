@@ -1,7 +1,11 @@
 import { Router } from "express";
 import { googleAuth, login, register } from "../controllers/auth.controller.js";
 import { validate } from "../middleware/validate.js";
-import { GoogleAuthSchema, LoginSchema, RegisterSchema } from "../types/user.js";
+import {
+  GoogleAuthSchema,
+  LoginSchema,
+  RegisterSchema,
+} from "../types/user.js";
 
 const router = Router();
 

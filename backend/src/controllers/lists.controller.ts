@@ -24,7 +24,7 @@ export async function getLists(
 export async function renameList(req: Request, res: Response, next: NextFunction) {
   try {
     const { id: userId } = req.user!;
-    const { listId } = req.params;
+    const listId = String(req.params["listId"]);
     const { name } = req.body as { name: string };
 
     const access = await prisma.userList.findFirst({ where: { listId, userId, status: "OWNER" } });
@@ -40,7 +40,7 @@ export async function renameList(req: Request, res: Response, next: NextFunction
 export async function deleteList(req: Request, res: Response, next: NextFunction) {
   try {
     const { id: userId } = req.user!;
-    const { listId } = req.params;
+    const listId = String(req.params["listId"]);
 
     const access = await prisma.userList.findFirst({ where: { listId, userId, status: "OWNER" } });
     if (!access) return res.status(403).json({ error: "Forbidden" });
@@ -70,7 +70,7 @@ export async function getInvitations(req: Request, res: Response, next: NextFunc
 export async function acceptInvitation(req: Request, res: Response, next: NextFunction) {
   try {
     const { id: userId } = req.user!;
-    const { listId } = req.params;
+    const listId = String(req.params["listId"]);
 
     const entry = await prisma.userList.findFirst({ where: { listId, userId, status: "PENDING" } });
     if (!entry) return res.status(404).json({ error: "Invitation not found" });
@@ -85,7 +85,7 @@ export async function acceptInvitation(req: Request, res: Response, next: NextFu
 export async function declineInvitation(req: Request, res: Response, next: NextFunction) {
   try {
     const { id: userId } = req.user!;
-    const { listId } = req.params;
+    const listId = String(req.params["listId"]);
 
     const entry = await prisma.userList.findFirst({ where: { listId, userId, status: "PENDING" } });
     if (!entry) return res.status(404).json({ error: "Invitation not found" });
@@ -132,7 +132,7 @@ export async function createList(
 export async function getMembers(req: Request, res: Response, next: NextFunction) {
   try {
     const { id: userId } = req.user!;
-    const { listId } = req.params;
+    const listId = String(req.params["listId"]);
 
     const access = await prisma.userList.findFirst({ where: { listId, userId } });
     if (!access) return res.status(403).json({ error: "Forbidden" });
@@ -151,7 +151,7 @@ export async function getMembers(req: Request, res: Response, next: NextFunction
 export async function addMember(req: Request, res: Response, next: NextFunction) {
   try {
     const { id: userId } = req.user!;
-    const { listId } = req.params;
+    const listId = String(req.params["listId"]);
     const { email } = req.body as { email: string };
 
     const access = await prisma.userList.findFirst({ where: { listId, userId } });
@@ -177,12 +177,12 @@ export async function addMember(req: Request, res: Response, next: NextFunction)
 export async function removeMember(req: Request, res: Response, next: NextFunction) {
   try {
     const { id: userId } = req.user!;
-    const { listId, memberId } = req.params;
+    const listId = String(req.params["listId"]);
+    const memberId = String(req.params["memberId"]);
 
     const myAccess = await prisma.userList.findFirst({ where: { listId, userId } });
     if (!myAccess) return res.status(403).json({ error: "Forbidden" });
 
-    // Only owner can remove others; members can remove themselves
     const isOwner = myAccess.status === "OWNER";
     if (!isOwner && memberId !== userId) return res.status(403).json({ error: "Forbidden" });
 

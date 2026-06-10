@@ -10,8 +10,8 @@ COPY prisma.config.ts ./
 COPY tsconfig.json ./
 COPY src ./src
 
-# Generate Prisma client (outputs to src/generated/prisma) then compile TS
-RUN npx prisma generate --schema=prisma/schema.prisma
+# Generate Prisma client — DATABASE_URL only needs to be a valid URI at generate time
+RUN DATABASE_URL=postgresql://localhost/dummy npx prisma generate --schema=prisma/schema.prisma
 RUN npm run build
 
 # ---- runner ----
@@ -26,6 +26,8 @@ RUN npm ci --omit=dev
 
 # Copy compiled output and generated Prisma client
 COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
+
 
 EXPOSE 3001
 
