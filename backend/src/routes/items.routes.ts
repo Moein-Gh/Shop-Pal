@@ -1,6 +1,9 @@
 import { Router } from "express";
 import {
   addItem,
+  batchAddItems,
+  batchCheckItems,
+  batchDeleteItems,
   checkItem,
   deleteItem,
   editItem,
@@ -11,12 +14,19 @@ import { validate } from "../middleware/validate.js";
 import { validateParams } from "../middleware/validateParams.js";
 import {
   AddNewItemSchema,
+  BatchAddItemsSchema,
+  BatchCheckItemsSchema,
+  BatchDeleteItemsSchema,
   EditItemSchema,
   ItemIdSchema,
   ItemsForListSchema,
 } from "../types/item.js";
 
 const itemsRouter = Router();
+
+itemsRouter.post("/batch", validate(BatchAddItemsSchema), batchAddItems);
+itemsRouter.patch("/batch/check", validate(BatchCheckItemsSchema), batchCheckItems);
+itemsRouter.delete("/batch", validate(BatchDeleteItemsSchema), batchDeleteItems);
 
 itemsRouter.get("/:listId", validateParams(ItemsForListSchema), getItems);
 itemsRouter.post("/", validate(AddNewItemSchema), addItem);

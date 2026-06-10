@@ -1,15 +1,24 @@
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { Send, Sparkles, X } from "lucide-react";
+import { Check, Send, Sparkles, X } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { api } from "../api/client";
+import { api, type PendingAction } from "../api/client";
 import { cn } from "../lib/utils";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 
-interface Message {
+interface TextMessage {
   role: "user" | "assistant";
   content: string;
 }
+
+interface ApprovalMessage {
+  role: "approval";
+  content: string;
+  actions: PendingAction[];
+  resolved: boolean;
+}
+
+type Message = TextMessage | ApprovalMessage;
 
 interface ChatSheetProps {
   open: boolean;
@@ -19,6 +28,59 @@ interface ChatSheetProps {
 }
 
 const SUGGESTIONS = ["Add milk and eggs", "Check off everything in Dairy", "Create a new list"];
+
+function ApprovalCard({
+  message,
+  onConfirm,
+  onCancel,
+}: {
+  message: ApprovalMessage;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 6 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.18 }}
+      className="flex justify-start"
+    >
+      <div className="max-w-[85%] rounded-2xl rounded-bl-sm bg-muted text-foreground overflow-hidden">
+        <div className="px-4 pt-3 pb-2">
+          <p className="text-sm leading-relaxed">{message.content}</p>
+          <ul className="mt-2 space-y-1">
+            {message.actions.map((action, i) => (
+              <li key={i} className="flex items-start gap-2 text-xs text-muted-foreground">
+                <span className="mt-0.5 w-1.5 h-1.5 rounded-full bg-primary/60 shrink-0" />
+                {action.description}
+              </li>
+            ))}
+          </ul>
+        </div>
+        {!message.resolved && (
+          <div className="flex border-t border-border">
+            <button
+              onClick={onCancel}
+              className="flex-1 py-2.5 text-xs font-medium text-muted-foreground hover:bg-muted/80 transition-colors border-r border-border"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={onConfirm}
+              className="flex-1 py-2.5 text-xs font-medium text-primary hover:bg-primary/10 transition-colors flex items-center justify-center gap-1.5"
+            >
+              <Check className="w-3.5 h-3.5" />
+              Confirm
+            </button>
+          </div>
+        )}
+        {message.resolved && (
+          <div className="px-4 pb-3 text-xs text-muted-foreground/60">Resolved</div>
+        )}
+      </div>
+    </motion.div>
+  );
+}
 
 function ChatContent({
   messages,
@@ -32,6 +94,8 @@ function ChatContent({
   onClose,
   activeListName,
   onSuggestion,
+  onApprove,
+  onReject,
 }: {
   messages: Message[];
   loading: boolean;
@@ -44,6 +108,8 @@ function ChatContent({
   onClose: () => void;
   activeListName: string | undefined;
   onSuggestion: (s: string) => void;
+  onApprove: (index: number) => void;
+  onReject: (index: number) => void;
 }) {
   return (
     <>
@@ -90,28 +156,41 @@ function ChatContent({
           </div>
         )}
 
-        {messages.map((msg, i) => (
-          <motion.div
-            key={i}
-            initial={{ opacity: 0, y: 6 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.18 }}
-            className={cn("flex", msg.role === "user" ? "justify-end" : "justify-start")}
-          >
-            <div
-              className={cn(
-                "max-w-[80%] px-4 py-2.5 rounded-2xl text-sm leading-relaxed",
-                msg.role === "user"
-                  ? "bg-primary text-primary-foreground rounded-br-sm"
-                  : "bg-muted text-foreground rounded-bl-sm",
-              )}
+        {messages.map((msg, i) => {
+          if (msg.role === "approval") {
+            return (
+              <ApprovalCard
+                key={i}
+                message={msg}
+                onConfirm={() => onApprove(i)}
+                onCancel={() => onReject(i)}
+              />
+            );
+          }
+
+          return (
+            <motion.div
+              key={i}
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.18 }}
+              className={cn("flex", msg.role === "user" ? "justify-end" : "justify-start")}
             >
-              {msg.role === "assistant"
-                ? msg.content.replace(/\*\*(.+?)\*\*/g, "$1").replace(/\*(.+?)\*/g, "$1").replace(/^[-*] /gm, "").trim()
-                : msg.content}
-            </div>
-          </motion.div>
-        ))}
+              <div
+                className={cn(
+                  "max-w-[80%] px-4 py-2.5 rounded-2xl text-sm leading-relaxed",
+                  msg.role === "user"
+                    ? "bg-primary text-primary-foreground rounded-br-sm"
+                    : "bg-muted text-foreground rounded-bl-sm",
+                )}
+              >
+                {msg.role === "assistant"
+                  ? msg.content.replace(/\*\*(.+?)\*\*/g, "$1").replace(/\*(.+?)\*/g, "$1").replace(/^[-*] /gm, "").trim()
+                  : msg.content}
+              </div>
+            </motion.div>
+          );
+        })}
 
         {loading && (
           <motion.div
@@ -179,29 +258,63 @@ export function ChatSheet({ open, onClose, activeListId, activeListName }: ChatS
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
 
-  const send = async () => {
-    const text = input.trim();
+  // Build the conversation history for the API (only text messages)
+  const buildApiMessages = (msgs: Message[]) =>
+    msgs
+      .filter((m): m is TextMessage => m.role === "user" || m.role === "assistant")
+      .map((m) => ({ role: m.role, content: m.content }));
+
+  const sendMessage = async (text: string, currentMessages: Message[]) => {
     if (!text || loading) return;
 
-    const userMessage: Message = { role: "user", content: text };
-    const next = [...messages, userMessage];
+    const userMessage: TextMessage = { role: "user", content: text };
+    const next = [...currentMessages, userMessage];
     setMessages(next);
     setInput("");
     setLoading(true);
 
     try {
       const { data } = await api.chat(
-        next,
+        buildApiMessages(next),
         activeListId ? { activeListId, activeListName } : undefined,
       );
-      setMessages([...next, { role: "assistant", content: data.message ?? "" }]);
-      queryClient.invalidateQueries({ queryKey: ["items"] });
-      queryClient.invalidateQueries({ queryKey: ["lists"] });
+
+      if (data.pendingActions && data.pendingActions.length > 0) {
+        const approvalMsg: ApprovalMessage = {
+          role: "approval",
+          content: data.message ?? "Here's what I'm going to do:",
+          actions: data.pendingActions,
+          resolved: false,
+        };
+        setMessages([...next, approvalMsg]);
+      } else {
+        setMessages([...next, { role: "assistant", content: data.message ?? "" }]);
+        queryClient.invalidateQueries({ queryKey: ["items"] });
+        queryClient.invalidateQueries({ queryKey: ["lists"] });
+      }
     } catch {
       setMessages([...next, { role: "assistant", content: "Something went wrong. Please try again." }]);
     } finally {
       setLoading(false);
     }
+  };
+
+  const send = () => sendMessage(input.trim(), messages);
+
+  const handleApprove = async (index: number) => {
+    const updated = messages.map((m, i) =>
+      i === index && m.role === "approval" ? { ...m, resolved: true } : m,
+    );
+    setMessages(updated);
+    await sendMessage("Yes, go ahead.", updated);
+  };
+
+  const handleReject = async (index: number) => {
+    const updated = messages.map((m, i) =>
+      i === index && m.role === "approval" ? { ...m, resolved: true } : m,
+    );
+    setMessages(updated);
+    await sendMessage("No, cancel that.", updated);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -223,6 +336,8 @@ export function ChatSheet({ open, onClose, activeListId, activeListName }: ChatS
     onClose,
     activeListName,
     onSuggestion: setInput,
+    onApprove: handleApprove,
+    onReject: handleReject,
   };
 
   if (isDesktop) {
@@ -244,7 +359,6 @@ export function ChatSheet({ open, onClose, activeListId, activeListName }: ChatS
     );
   }
 
-  // Mobile: bottom sheet, no backdrop so the list stays visible
   return (
     <AnimatePresence>
       {open && (

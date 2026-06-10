@@ -1,5 +1,10 @@
 import axios, { AxiosInstance } from "axios";
 import type { AddNewItemInput, EditItemInput, Item } from "../types/Item";
+
+export interface PendingAction {
+  type: string;
+  description: string;
+}
 import type { List } from "../types/List";
 import type { AuthResponse } from "../types/User";
 import type { UserList } from "../types/UserList";
@@ -55,7 +60,7 @@ export const api = {
 
   // Chat
   chat: (messages: { role: string; content: string }[], context?: { activeListId?: string; activeListName?: string }) =>
-    client.post<{ message: string }>("/chat", { messages, context }),
+    client.post<{ message: string; pendingActions?: PendingAction[] }>("/chat", { messages, context }),
 
   // Items
   getItemsByList: (listId: string) => client.get<Item[]>(`/items/${listId}`),
@@ -66,6 +71,12 @@ export const api = {
   uncheckItem: (itemId: string) =>
     client.patch<Item>(`/items/uncheck/${itemId}`),
   deleteItem: (itemId: string) => client.delete(`/items/${itemId}`),
+  batchAddItems: (listId: string, items: { name: string; quantity?: string; category?: string; note?: string }[]) =>
+    client.post<Item[]>("/items/batch", { listId, items }),
+  batchCheckItems: (itemIds: string[], checked: boolean) =>
+    client.patch<{ updated: number }>("/items/batch/check", { itemIds, checked }),
+  batchDeleteItems: (itemIds: string[]) =>
+    client.delete<{ deleted: number }>("/items/batch", { data: { itemIds } }),
 };
 
 export default client;

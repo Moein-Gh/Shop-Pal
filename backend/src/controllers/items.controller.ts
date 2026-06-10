@@ -1,6 +1,6 @@
 import type { NextFunction, Request, Response } from "express";
 import { prisma } from "../libs/prisma.js";
-import type { AddNewItemInput, EditItemInput } from "../types/item.js";
+import type { AddNewItemInput, BatchAddItemsInput, BatchCheckItemsInput, BatchDeleteItemsInput, EditItemInput } from "../types/item.js";
 
 export type ItemsRequest = Request<{ listId: string }>;
 
@@ -175,6 +175,73 @@ export const uncheckItem = async (req: ItemIdRequest, res: Response) => {
     res.status(200).json(uncheckedItem);
   } catch (error) {
     res.status(500).json({ error: "Failed to uncheck item" });
+  }
+};
+
+export type BatchAddItemsRequest = Request<{}, any, BatchAddItemsInput>;
+
+export const batchAddItems = async (req: BatchAddItemsRequest, res: Response) => {
+  try {
+    const { listId, items } = req.body;
+    const { id: userId } = req.user!;
+
+    const userList = await prisma.userList.findFirst({ where: { listId, userId } });
+    if (!userList) {
+      res.status(403).json({ error: "Access denied" });
+      return;
+    }
+
+    const created = await prisma.$transaction(
+      items.map((item) =>
+        prisma.item.create({
+          data: { name: item.name, listId, quantity: item.quantity ?? null, category: item.category ?? null, note: item.note ?? null, creatorUserId: userId },
+        }),
+      ),
+    );
+
+    res.status(201).json(created);
+  } catch {
+    res.status(500).json({ error: "Failed to batch add items" });
+  }
+};
+
+export type BatchCheckItemsRequest = Request<{}, any, BatchCheckItemsInput>;
+
+export const batchCheckItems = async (req: BatchCheckItemsRequest, res: Response) => {
+  try {
+    const { itemIds, checked } = req.body;
+    const { id: userId } = req.user!;
+
+    const items = await prisma.item.findMany({ where: { id: { in: itemIds } } });
+    const listIds = [...new Set(items.map((i) => i.listId))];
+    const access = await prisma.userList.findMany({ where: { listId: { in: listIds }, userId } });
+    const accessibleListIds = new Set(access.map((a) => a.listId));
+    const allowedIds = items.filter((i) => accessibleListIds.has(i.listId)).map((i) => i.id);
+
+    await prisma.item.updateMany({ where: { id: { in: allowedIds } }, data: { checked } });
+    res.status(200).json({ updated: allowedIds.length });
+  } catch {
+    res.status(500).json({ error: "Failed to batch check items" });
+  }
+};
+
+export type BatchDeleteItemsRequest = Request<{}, any, BatchDeleteItemsInput>;
+
+export const batchDeleteItems = async (req: BatchDeleteItemsRequest, res: Response) => {
+  try {
+    const { itemIds } = req.body;
+    const { id: userId } = req.user!;
+
+    const items = await prisma.item.findMany({ where: { id: { in: itemIds } } });
+    const listIds = [...new Set(items.map((i) => i.listId))];
+    const access = await prisma.userList.findMany({ where: { listId: { in: listIds }, userId } });
+    const accessibleListIds = new Set(access.map((a) => a.listId));
+    const allowedIds = items.filter((i) => accessibleListIds.has(i.listId)).map((i) => i.id);
+
+    await prisma.item.deleteMany({ where: { id: { in: allowedIds } } });
+    res.status(200).json({ deleted: allowedIds.length });
+  } catch {
+    res.status(500).json({ error: "Failed to batch delete items" });
   }
 };
 
