@@ -59,8 +59,8 @@ export const api = {
   declineInvitation: (listId: string) => client.post(`/lists/${listId}/invitations/decline`),
 
   // Chat
-  chat: (messages: { role: string; content: string }[], context?: { activeListId?: string; activeListName?: string }) =>
-    client.post<{ message: string; pendingActions?: PendingAction[] }>("/chat", { messages, context }),
+  chat: (messages: { role: string; content: string }[], context?: { activeListId?: string; activeListName?: string }, pendingId?: string) =>
+    client.post<{ message: string; pendingActions?: PendingAction[]; pendingId?: string }>("/chat", { messages, context, pendingId }),
 
   // Items
   getItemsByList: (listId: string) => client.get<Item[]>(`/items/${listId}`),

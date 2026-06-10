@@ -10,29 +10,47 @@ export interface PendingAction {
   description: string;
 }
 
+// Short-lived store for paused conversations awaiting user approval.
+// Keyed by a random ID returned to the frontend; expires after 10 minutes.
+const pendingConversations = new Map<string, {
+  conversation: OpenAI.Chat.ChatCompletionMessageParam[];
+  expiresAt: number;
+}>();
+
+function storePendingConversation(conversation: OpenAI.Chat.ChatCompletionMessageParam[]): string {
+  const id = Math.random().toString(36).slice(2) + Date.now().toString(36);
+  pendingConversations.set(id, { conversation, expiresAt: Date.now() + 10 * 60 * 1000 });
+  // Prune expired entries opportunistically
+  for (const [key, val] of pendingConversations) {
+    if (val.expiresAt < Date.now()) pendingConversations.delete(key);
+  }
+  return id;
+}
+
 const tools: OpenAI.Chat.ChatCompletionTool[] = [
   {
     type: "function",
     function: {
       name: "request_approval",
       description:
-        "Present the planned actions to the user for approval BEFORE executing any write operation " +
+        "Present planned actions to the user for approval BEFORE executing any write operation " +
         "(add_item, update_item, delete_item, check_item, uncheck_item, create_list). " +
-        "You MUST call this first. Do NOT call any write tool until you receive confirmation.",
+        "You MUST call this first.",
       parameters: {
         type: "object",
         properties: {
           summary: {
             type: "string",
-            description: "One sentence describing what you're about to do.",
+            description: "One friendly sentence describing what you're about to do.",
           },
           actions: {
             type: "array",
+            description: "Human-readable list of actions for the user to review.",
             items: {
               type: "object",
               properties: {
                 type: { type: "string", description: "Tool name e.g. add_item, delete_item" },
-                description: { type: "string", description: "Human-readable description of the action" },
+                description: { type: "string", description: "Plain friendly description, no IDs or technical terms" },
               },
               required: ["type", "description"],
             },
@@ -162,6 +180,11 @@ const tools: OpenAI.Chat.ChatCompletionTool[] = [
     },
   },
 ];
+
+// Execution tools: no request_approval — used when resuming after user confirms
+const executionTools = tools.filter(
+  (t) => t.type === "function" && t.function.name !== "request_approval",
+);
 
 async function runTool(
   name: string,
@@ -300,7 +323,19 @@ export type ChatRequest = Request<{}, any, ChatInput>;
 export async function chat(req: ChatRequest, res: Response, next: NextFunction) {
   try {
     const { id: userId } = req.user!;
-    const { messages, context } = req.body;
+    const { messages, context, pendingId } = req.body;
+
+    // Resume a stored conversation after user approval — the LLM continues from exactly
+    // where it paused, with request_approval removed so it proceeds to execute.
+    if (pendingId) {
+      const stored = pendingConversations.get(pendingId);
+      if (!stored || stored.expiresAt < Date.now()) {
+        res.status(410).json({ error: "Approval expired. Please try again." });
+        return;
+      }
+      pendingConversations.delete(pendingId);
+      return runLoop(stored.conversation, executionTools, userId, res);
+    }
 
     const contextNote = context?.activeListId
       ? `The user is currently viewing the list "${context.activeListName ?? "unknown"}" (id: ${context.activeListId}). ` +
@@ -310,73 +345,87 @@ export async function chat(req: ChatRequest, res: Response, next: NextFunction) 
     const systemMessage: OpenAI.Chat.ChatCompletionSystemMessageParam = {
       role: "system",
       content:
-        "You are a concise shopping list assistant. " +
-        "Rules: no markdown, no bullet points, no bold/italic, no lists. " +
-        "Keep every reply to 1-2 plain sentences. " +
+        "You are a friendly shopping list assistant. Talk like a helpful friend, not a developer. " +
+        "Rules: no markdown, no bullet points, no bold/italic. Keep every reply to 1-2 plain sentences. " +
         "APPROVAL RULE: Before ANY write operation (add_item, update_item, delete_item, check_item, uncheck_item, create_list) " +
-        "you MUST call request_approval first listing every action you plan to take. Only proceed after the user says yes/confirmed/ok. " +
+        "you MUST call request_approval first. " +
         "DUPLICATE RULE: Before calling add_item, always call get_items first to check for existing items with the same name. " +
-        "If a duplicate exists, include it in request_approval and ask whether to update quantity/fields or add as new. " +
-        "If you took an action just say what you did in one short sentence. " +
+        "If a duplicate exists, include it in request_approval and ask whether to update or add as new. " +
+        "ACTION DESCRIPTION RULE: Write action descriptions that show the NEW value, not the current state. " +
+        "The user already knows what's missing — they want to see what it will become. " +
+        "Never include IDs, UUIDs, technical terms, or explanations like 'since it's not set yet'. " +
+        "Good examples: 'Set Biscuits category to Snacks', 'Set Tea category to Beverages', " +
+        "'Add Milk (2 liters)', 'Remove Eggs', 'Change Butter quantity to 500g', 'Mark Bread as done'. " +
+        "If you took an action just say what you did in one short friendly sentence. " +
         "Never enumerate items back to the user unless they explicitly asked you to. " +
         contextNote,
     };
 
     const conversation: OpenAI.Chat.ChatCompletionMessageParam[] = [systemMessage, ...messages];
-
-    while (true) {
-      const response = await openai.chat.completions.create({
-        model: "gpt-5.4-nano",
-        messages: conversation,
-        tools,
-        tool_choice: "auto",
-      });
-
-      const message = response.choices[0]?.message;
-      if (message) conversation.push(message);
-
-      if (!message?.tool_calls || message.tool_calls.length === 0) {
-        res.json({ message: message?.content });
-        return;
-      }
-
-      const toolResults = await Promise.all(
-        message.tool_calls.map(async (call) => {
-          if (call.type !== "function") return null;
-          const args = JSON.parse(call.function.arguments);
-          const result = await runTool(call.function.name, args, userId);
-          return {
-            role: "tool" as const,
-            tool_call_id: call.id,
-            content: JSON.stringify(result),
-          };
-        }),
-      );
-
-      const filtered = toolResults.filter((r) => r !== null);
-
-      // Detect approval request and return it to the frontend
-      const approvalResult = filtered.find((r) => {
-        try {
-          return JSON.parse(r!.content).awaiting_approval === true;
-        } catch {
-          return false;
-        }
-      });
-
-      if (approvalResult) {
-        const { summary, actions } = JSON.parse(approvalResult.content) as {
-          awaiting_approval: true;
-          summary: string;
-          actions: PendingAction[];
-        };
-        res.json({ message: summary, pendingActions: actions });
-        return;
-      }
-
-      conversation.push(...filtered);
-    }
+    return runLoop(conversation, tools, userId, res);
   } catch (err) {
     next(err);
+  }
+}
+
+async function runLoop(
+  conversation: OpenAI.Chat.ChatCompletionMessageParam[],
+  activeTools: OpenAI.Chat.ChatCompletionTool[],
+  userId: string,
+  res: Response,
+) {
+  while (true) {
+    const response = await openai.chat.completions.create({
+      model: "gpt-5.4-nano",
+      messages: conversation,
+      tools: activeTools,
+      tool_choice: "auto",
+    });
+
+    const message = response.choices[0]?.message;
+    if (message) conversation.push(message);
+
+    if (!message?.tool_calls || message.tool_calls.length === 0) {
+      res.json({ message: message?.content });
+      return;
+    }
+
+    const toolResults = await Promise.all(
+      message.tool_calls.map(async (call) => {
+        if (call.type !== "function") return null;
+        const args = JSON.parse(call.function.arguments);
+        const result = await runTool(call.function.name, args, userId);
+        return {
+          role: "tool" as const,
+          tool_call_id: call.id,
+          content: JSON.stringify(result),
+        };
+      }),
+    );
+
+    const filtered = toolResults.filter((r) => r !== null);
+
+    // Detect approval request: store the full conversation and pause for user confirmation.
+    // The conversation is resumed on the next request via pendingId — no re-planning needed.
+    const approvalResult = filtered.find((r) => {
+      try { return JSON.parse(r!.content).awaiting_approval === true; } catch { return false; }
+    });
+
+    if (approvalResult) {
+      const { summary, actions } = JSON.parse(approvalResult.content) as {
+        awaiting_approval: true;
+        summary: string;
+        actions: PendingAction[];
+      };
+      // Store conversation state AFTER the request_approval tool result so the LLM
+      // resumes knowing approval was granted and proceeds to the actual tool calls.
+      conversation.push(...filtered);
+      conversation.push({ role: "user", content: "Yes, approved. Please proceed." });
+      const pendingId = storePendingConversation(conversation);
+      res.json({ message: summary, pendingActions: actions, pendingId });
+      return;
+    }
+
+    conversation.push(...filtered);
   }
 }

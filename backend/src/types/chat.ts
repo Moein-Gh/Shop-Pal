@@ -8,4 +8,5 @@ export type UIContext = {
 export type ChatInput = {
   messages: OpenAI.Chat.ChatCompletionMessageParam[];
   context?: UIContext;
+  pendingId?: string;  // set on confirmation to resume a stored conversation
 };

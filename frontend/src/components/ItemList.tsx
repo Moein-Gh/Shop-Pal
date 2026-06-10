@@ -1,9 +1,9 @@
 import { AnimatePresence, motion } from "motion/react";
-import { Loader2, ShoppingCart, Plus } from "lucide-react";
-import { getCategoryStyle } from "../lib/categories";
+import { Loader2, ShoppingCart, Plus, ChevronDown } from "lucide-react";
 import { cn } from "../lib/utils";
 import { SwipeableItem } from "./SwipeableItem";
 import type { Item } from "../types";
+import { useState } from "react";
 
 interface ItemListProps {
   activeListId: string | null;
@@ -23,21 +23,24 @@ export function ItemList({
   listsLoading,
   itemsLoading,
   items,
-  activeCategory,
-  onCategoryFilter,
   onToggleCheck,
   onDeleteItem,
   onNavigateItem,
   onCreateList,
 }: ItemListProps) {
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+
+  const toggle = (category: string) =>
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      next.has(category) ? next.delete(category) : next.add(category);
+      return next;
+    });
+
   const uncheckedItems = items?.filter((i) => !i.checked) ?? [];
   const checkedItems = items?.filter((i) => i.checked) ?? [];
 
-  const filteredUnchecked = activeCategory
-    ? uncheckedItems.filter((i) => (i.category || "Other") === activeCategory)
-    : uncheckedItems;
-
-  const grouped = filteredUnchecked.reduce<Record<string, Item[]>>((acc, item) => {
+  const grouped = uncheckedItems.reduce<Record<string, Item[]>>((acc, item) => {
     const key = item.category || "Other";
     if (!acc[key]) acc[key] = [];
     acc[key].push(item);
@@ -108,56 +111,58 @@ export function ItemList({
   return (
     <>
       {Object.entries(grouped).map(([category, categoryItems]) => {
-        const style = getCategoryStyle(category);
-        const Icon = style.icon;
-        const isFiltered = activeCategory === category;
+        const isCollapsed = collapsed.has(category);
         return (
           <div key={category} className="mb-6">
-            <div className="flex items-center gap-2 mb-2 px-1">
-              <motion.button
-                whileTap={{ scale: 0.93 }}
-                onClick={() => onCategoryFilter(isFiltered ? null : category)}
-                className={cn(
-                  "flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold transition-all",
-                  style.badgeClass,
-                  isFiltered && "ring-2 ring-current/30",
-                )}
-              >
-                <Icon className="w-3.5 h-3.5" />
+            <button
+              onClick={() => toggle(category)}
+              className="flex items-center gap-3 w-full mb-2 px-1 group"
+            >
+              <div className="flex-1 h-px bg-border" />
+              <span className="flex items-center gap-1 text-xs font-medium text-muted-foreground shrink-0 select-none">
                 {category}
-              </motion.button>
-              <span className="text-xs text-muted-foreground">{categoryItems.length}</span>
-              {isFiltered && (
-                <motion.span
-                  initial={{ opacity: 0, scale: 0.8 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  className="text-xs text-muted-foreground"
-                >
-                  · filtered
-                </motion.span>
-              )}
-            </div>
+                <ChevronDown
+                  className={cn(
+                    "w-3.5 h-3.5 transition-transform duration-200",
+                    isCollapsed && "-rotate-90",
+                  )}
+                />
+              </span>
+              <div className="flex-1 h-px bg-border" />
+            </button>
 
-            <div className="space-y-2">
-              <AnimatePresence initial={false}>
-                {categoryItems.map((item) => (
-                  <motion.div
-                    key={item.id}
-                    initial={{ opacity: 0, y: 6 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, scale: 0.96, transition: { duration: 0.16 } }}
-                    transition={{ duration: 0.18 }}
-                  >
-                    <SwipeableItem
-                      item={item}
-                      onCheck={() => onToggleCheck(item)}
-                      onDelete={() => onDeleteItem(item.id)}
-                      onNavigate={() => onNavigateItem(item.id)}
-                    />
-                  </motion.div>
-                ))}
-              </AnimatePresence>
-            </div>
+            <AnimatePresence initial={false}>
+              {!isCollapsed && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: "auto" }}
+                  exit={{ opacity: 0, height: 0 }}
+                  transition={{ duration: 0.2 }}
+                  className="overflow-hidden"
+                >
+                  <div className="space-y-2">
+                    <AnimatePresence initial={false}>
+                      {categoryItems.map((item) => (
+                        <motion.div
+                          key={item.id}
+                          initial={{ opacity: 0, y: 6 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, scale: 0.96, transition: { duration: 0.16 } }}
+                          transition={{ duration: 0.18 }}
+                        >
+                          <SwipeableItem
+                            item={item}
+                            onCheck={() => onToggleCheck(item)}
+                            onDelete={() => onDeleteItem(item.id)}
+                            onNavigate={() => onNavigateItem(item.id)}
+                          />
+                        </motion.div>
+                      ))}
+                    </AnimatePresence>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
         );
       })}
