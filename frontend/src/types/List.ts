@@ -1,8 +1,6 @@
 export interface List {
   id: string;
   name: string;
-  description?: string;
-  creatorUserId: string;
+  ownerId: string;
   createdAt: string;
-  updatedAt: string;
 }

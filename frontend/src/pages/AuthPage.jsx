@@ -1,10 +1,13 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { useSetAtom } from "jotai";
 import { ShoppingCart, Loader2 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { api } from "../api/client";
+import { authAtom } from "../atoms/auth";
 
 const tabs = ["login", "signup"];
 
@@ -13,6 +16,8 @@ export default function AuthPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [formData, setFormData] = useState({ email: "", password: "", name: "" });
+  const setAuth = useSetAtom(authAtom);
+  const navigate = useNavigate();
 
   const isLogin = activeTab === "login";
 
@@ -33,10 +38,11 @@ export default function AuthPage() {
     try {
       const res = isLogin
         ? await api.login(formData.email, formData.password)
-        : await api.signup(formData.email, formData.password, formData.name);
+        : await api.register(formData.email, formData.password, formData.name);
       localStorage.setItem("token", res.data.token);
       localStorage.setItem("user", JSON.stringify(res.data.user));
-      window.location.href = "/";
+      setAuth(res.data);
+      navigate("/");
     } catch (err) {
       setError(err.response?.data?.error || "Something went wrong");
     } finally {
@@ -52,7 +58,6 @@ export default function AuthPage() {
       </div>
 
       <div className="relative w-full max-w-sm">
-        {/* Logo */}
         <div className="flex flex-col items-center mb-8">
           <div className="flex items-center justify-center w-14 h-14 rounded-2xl bg-primary text-primary-foreground shadow-lg mb-4">
             <ShoppingCart className="w-7 h-7" />
@@ -61,9 +66,7 @@ export default function AuthPage() {
           <p className="text-sm text-muted-foreground mt-1">Your smart shopping companion</p>
         </div>
 
-        {/* Card */}
         <div className="bg-card border border-border rounded-2xl shadow-xl p-6">
-          {/* Tab bar */}
           <div className="relative flex bg-muted rounded-lg p-1 mb-6">
             <motion.div
               className="absolute top-1 bottom-1 left-1 w-[calc(50%-4px)] rounded-md bg-background shadow"
@@ -84,7 +87,6 @@ export default function AuthPage() {
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
-            {/* Name field — only for signup */}
             <AnimatePresence initial={false}>
               {!isLogin && (
                 <motion.div

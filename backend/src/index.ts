@@ -1,6 +1,6 @@
 import cors from "cors";
 import "dotenv/config";
-import type { NextFunction, Request, Response } from "express";
+import type { Request, Response } from "express";
 import express from "express";
 import { createServer } from "http";
 import router from "./router.js";
@@ -13,12 +13,6 @@ app.use("/api", router);
 
 app.get("/health", (_req: Request, res: Response) => {
   res.json({ status: "ok" });
-});
-
-app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
-  console.error(err);
-  const message = err instanceof Error ? err.message : "Internal server error";
-  res.status(500).json({ error: message });
 });
 
 const server = createServer(app);
