@@ -33,6 +33,10 @@ export default function AuthPage() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (formData.password.length < 8) {
+      setError("Password must be at least 8 characters");
+      return;
+    }
     setLoading(true);
     setError("");
     try {

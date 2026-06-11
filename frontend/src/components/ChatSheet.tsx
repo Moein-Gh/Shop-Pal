@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { Check, Send, Sparkles, Trash2, X } from "lucide-react";
+import { Check, Loader2, Send, Sparkles, Trash2, X } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { api, type PendingAction } from "../api/client";
 import { cn } from "../lib/utils";
@@ -18,6 +18,7 @@ interface ApprovalMessage {
   actions: PendingAction[];
   pendingId: string;
   resolved: boolean;
+  confirming?: boolean;
 }
 
 type Message = TextMessage | ApprovalMessage;
@@ -83,7 +84,28 @@ function ApprovalCard({
             })}
           </div>
         </div>
-        {!message.resolved ? (
+        {message.resolved ? (
+          <div className="px-4 pb-4 pt-1">
+            <div className="flex items-center gap-2.5 bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-3 py-2.5">
+              <div className="w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center shrink-0">
+                <Check className="w-3 h-3 text-white" />
+              </div>
+              <div>
+                <p className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">All done!</p>
+                <p className="text-xs text-emerald-600/70 dark:text-emerald-400/70">
+                  {message.actions.length === 1 ? "1 action completed" : `${message.actions.length} actions completed`}
+                </p>
+              </div>
+            </div>
+          </div>
+        ) : message.confirming ? (
+          <div className="px-4 pb-4 pt-1">
+            <div className="flex items-center gap-2.5 bg-muted rounded-xl px-3 py-2.5">
+              <Loader2 className="w-4 h-4 text-muted-foreground animate-spin shrink-0" />
+              <p className="text-xs text-muted-foreground">Applying changes…</p>
+            </div>
+          </div>
+        ) : (
           <>
             <div className="px-4 pb-3 flex gap-2">
               <input
@@ -118,8 +140,6 @@ function ApprovalCard({
               </button>
             </div>
           </>
-        ) : (
-          <div className="px-4 pb-2.5 text-xs text-muted-foreground/50">Done</div>
         )}
       </div>
     </motion.div>
@@ -160,30 +180,32 @@ function ChatContent({
   return (
     <>
       {/* Header */}
-      <div className="flex items-center px-5 pt-4 pb-3 gap-3 shrink-0">
-        <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
-          <Sparkles className="w-4 h-4 text-primary" />
+      <div className="flex items-center px-5 pt-5 pb-4 gap-3 shrink-0">
+        <div className="w-9 h-9 rounded-xl bg-linear-to-br from-primary/80 to-primary flex items-center justify-center shadow-sm">
+          <Sparkles className="w-4 h-4 text-primary-foreground" />
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold">AI Assistant</p>
-          {activeListName && (
+          <p className="text-sm font-semibold tracking-tight">AI Assistant</p>
+          {activeListName ? (
             <p className="text-xs text-muted-foreground truncate">Viewing: {activeListName}</p>
+          ) : (
+            <p className="text-xs text-muted-foreground">Ready to help</p>
           )}
         </div>
         <button
           onClick={onClose}
-          className="w-8 h-8 rounded-full flex items-center justify-center text-muted-foreground hover:bg-muted/60 transition-colors"
+          className="w-8 h-8 rounded-full flex items-center justify-center text-muted-foreground hover:bg-muted/80 hover:text-foreground transition-colors"
         >
           <X className="w-4 h-4" />
         </button>
       </div>
 
-      <div className="mx-5 h-px bg-border shrink-0" />
+      <div className="mx-5 h-px bg-border/60 shrink-0" />
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3 min-h-0">
+      <div className={cn("flex-1 px-4 py-4 min-h-0", messages.length === 0 ? "flex flex-col" : "overflow-y-auto space-y-3")}>
         {messages.length === 0 && (
-          <div className="flex flex-col items-center justify-center h-full gap-3 py-8 text-center">
+          <div className="flex flex-col items-center justify-center flex-1 gap-3 text-center">
             <Sparkles className="w-8 h-8 text-muted-foreground/30" />
             <p className="text-sm text-muted-foreground">
               Ask me to add items, check things off, or manage your lists.
@@ -367,28 +389,30 @@ export function ChatSheet({ open, onClose, activeListId, activeListName }: ChatS
     const approvalMsg = messages[index];
     if (approvalMsg.role !== "approval") return;
 
-    const resolved = messages.map((m, i) =>
-      i === index ? { ...m, resolved: true } : m,
+    const confirming = messages.map((m, i) =>
+      i === index ? { ...m, confirming: true } : m,
     );
-    setMessages(resolved);
+    setMessages(confirming);
     setLoading(true);
 
     try {
       // Resume the stored server-side conversation via pendingId — the LLM continues
       // from exactly where it paused and executes the tool calls it already planned.
-      const { data } = await api.chat(
-        buildApiMessages(resolved),
+      await api.chat(
+        buildApiMessages(confirming),
         activeListId ? { activeListId, activeListName } : undefined,
         approvalMsg.pendingId,
       );
-      const actionLines = approvalMsg.actions.map((a) => a.description).join("\n");
-      const confirmContent = actionLines || approvalMsg.content || (data.message ?? "Done!");
-      const confirmMsg: TextMessage = { role: "assistant", content: confirmContent };
-      setMessages([...resolved, confirmMsg]);
+      setMessages((prev) =>
+        prev.map((m, i) => i === index ? { ...m, confirming: false, resolved: true } : m),
+      );
       queryClient.invalidateQueries({ queryKey: ["items"] });
       queryClient.invalidateQueries({ queryKey: ["lists"] });
     } catch {
-      setMessages([...resolved, { role: "assistant", content: "Something went wrong. Please try again." }]);
+      setMessages((prev) => [
+        ...prev.map((m, i) => i === index ? { ...m, confirming: false } : m),
+        { role: "assistant", content: "Something went wrong. Please try again." } as TextMessage,
+      ]);
     } finally {
       setLoading(false);
     }
@@ -437,16 +461,29 @@ export function ChatSheet({ open, onClose, activeListId, activeListName }: ChatS
     return (
       <AnimatePresence>
         {open && (
-          <motion.div
-            initial={{ x: "100%", opacity: 0 }}
-            animate={{ x: 0, opacity: 1 }}
-            exit={{ x: "100%", opacity: 0 }}
-            transition={{ type: "spring", stiffness: 340, damping: 36 }}
-            className="fixed right-0 top-0 bottom-0 z-40 w-96 flex flex-col border-l border-border"
-            style={{ background: "var(--color-card)" }}
-          >
-            <ChatContent {...sharedProps} />
-          </motion.div>
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              className="fixed inset-0 z-30"
+              onClick={onClose}
+            />
+            <motion.div
+              initial={{ x: 32, opacity: 0, scale: 0.97 }}
+              animate={{ x: 0, opacity: 1, scale: 1 }}
+              exit={{ x: 32, opacity: 0, scale: 0.97 }}
+              transition={{ type: "spring", stiffness: 380, damping: 38 }}
+              className="fixed right-4 top-4 bottom-4 z-40 w-88 flex flex-col rounded-2xl overflow-hidden border border-border/50"
+              style={{
+                background: "var(--color-card)",
+                boxShadow: "0 8px 48px rgba(0,0,0,0.22), 0 2px 12px rgba(0,0,0,0.12)",
+              }}
+            >
+              <ChatContent {...sharedProps} />
+            </motion.div>
+          </>
         )}
       </AnimatePresence>
     );
